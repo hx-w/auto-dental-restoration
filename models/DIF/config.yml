@@ -1,0 +1,8 @@
+name: DIF-Net
+
+model_name: DeformedImplicitField
+
+base_dir: models/DIF
+templates_dir: models/DIF/templates
+specs_dir: models/DIF/specs
+ckpt_dir: models/DIF/checkpoints

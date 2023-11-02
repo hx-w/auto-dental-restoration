@@ -1,0 +1,8 @@
+name: ToothDIT
+
+model_name: Decoder
+
+base_dir: models/ToothDIT
+templates_dir: models/ToothDIT/templates
+specs_dir: models/ToothDIT/specs
+ckpt_dir: models/ToothDIT/checkpoints
