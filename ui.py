@@ -6,8 +6,8 @@ from context import Context
 
 class GradioGUI:
     def __init__(self, methods: list):
-        self.MISC = ['使用缓存', '显示模板牙', '显示误差图', '显示SDF预览图']
-        self.LOCS = ['#11', '#21', '#15']
+        self.MISC = ['使用缓存', '显示模板牙']
+        self.LOCS = ['#11', '#15']
         self.RESOL_MAP = {
             '低 (128x128)': 128,
             '中 (256x256)': 256,
@@ -21,6 +21,7 @@ class GradioGUI:
             checkbox_background_color_dark='*neutral_900'
         )
         self.inst = gr.Blocks(theme=theme)
+        self._ctx = None # current session context
         self.__build()
 
     def __build(self):
@@ -50,7 +51,13 @@ class GradioGUI:
                         value=self.LOCS[0],
                         label='牙齿位置',
                     )
-                    inp_iter = gr.Slider(300, 1000, step=10, label="迭代次数", value=500)
+
+                    with gr.Row():
+                        inp_sample_up = gr.Slider(1.0, 100.0, value=100.0, step=1.0, label='切端采样比例')
+                        inp_sample_mid = gr.Slider(1.0, 100.0, value=100.0, step=1.0, label='中端采样比例')
+                        inp_sample_down = gr.Slider(1.0, 100.0, value=100.0, step=1.0, label='龈端采样比例')
+
+                    inp_iter = gr.Slider(300, 1000, step=10, label="重建迭代次数", value=500)
                     inp_resol = gr.Dropdown(
                         label="网格重建精度",
                         info="括号中为Marching Cubes的体素精度",
@@ -65,6 +72,15 @@ class GradioGUI:
                             value=self.MISC[:1]
                         )
                     
+                    with gr.Accordion(label='后处理', open=False):
+                        inp_smooth = gr.Slider(0.0, 50.0, step=1.0, value=10.0, label='网格光滑程度')
+                        with gr.Row():
+                            inp_post = gr.CheckboxGroup(
+                                show_label=False,
+                                choices=['计算SDF切面图', '计算误差分布'],
+                                value=[]
+                            )
+
                     btn_commit = gr.Button('开始重建', interactive=False)
 
                 # Output part
@@ -81,24 +97,31 @@ class GradioGUI:
                 # Misc part
                 with gr.Column(visible=False) as show_total:
                     gr.Markdown('### 附加输出区')
-                    show_templates = []
-                    otp_templates = []
+                    show_templates, show_slices, show_errors = [], [], []
+                    otp_templates, otp_slices, otp_errors = [], [], []
+
 
                     for mtd in self.Methods: 
                         with gr.Column(visible=mtd == self.Methods[0]) as show_temp:
                             otp_temp = gr.Model3D(label=f'模板牙齿模型 ({mtd})')
                             show_templates.append(show_temp)
                             otp_templates.append(otp_temp)
-                    with gr.Column(visible=False) as show_slices:
-                        otp_slices = gr.Gallery(
-                            label="完整牙齿SDF切面", show_label=True,
-                            columns=[3], rows=[1], object_fit="fill", height='500'
-                        )
-                    with gr.Column(visible=False) as show_errors:
-                        otp_errors = gr.Plot(
-                            label="逐点误差图", show_label=True
-                        )
+                        with gr.Column(visible=False) as show_slice:
+                            otp_slice = gr.Gallery(
+                                label=f"完整牙齿SDF切面 ({mtd})", show_label=True,
+                                columns=[3], rows=[1], object_fit="fill", height='500'
+                            )
+                            show_slices.append(show_slice)
+                            otp_slices.append(otp_slice)
+                        with gr.Column(visible=False) as show_error:
+                            otp_error = gr.Plot(
+                                label=f"逐点误差图 ({mtd})", show_label=True
+                            )
+                            show_errors.append(show_error)
+                            otp_errors.append(otp_error)
         
+            ############ EVENTS ##############
+
             # logic for change
             def on_location_change(loc: str):
                 locid = f'{loc[1:]}_Outside.obj'
@@ -117,13 +140,9 @@ class GradioGUI:
             def on_misc_change(misc_selected: list, method_selected: list, loc: str):
                 _total = len(misc_selected) > 1 or (len(misc_selected) == 1 and self.MISC[0] not in misc_selected)
                 _temps = self.MISC[1] in misc_selected
-                _slices = self.MISC[2] in misc_selected
-                _errors = self.MISC[3] in misc_selected
 
                 result = {
                     show_total: gr.update(visible=_total),
-                    show_slices: gr.update(visible=_slices),
-                    show_errors: gr.update(visible=_errors),
                     **on_location_change(loc)
                 }
 
@@ -131,8 +150,9 @@ class GradioGUI:
                     mtd = mtd.__str__()
                     result[show_templates[reverse_index[mtd]]] = gr.update(visible=_temps and mtd in method_selected)
 
-
                 return result
+
+            # def on_post_change(smooth: int, post_selected: list)
 
             def on_methods_change(method_selected: list, misc_selected: list):
                 if len(method_selected) == 0:
@@ -151,38 +171,43 @@ class GradioGUI:
 
             def on_submit_click(
                     mesh_path: str, mtds: list, loc: str, iter: int, resol: str, miscs: list,
+                    sample_up: int, sample_mid: int, sample_down: int, smooth: int,
                     progress=gr.Progress(track_tqdm=True)
                 ):
                 inst_methods = [self.Methods[reverse_index[mtd]] for mtd in mtds]
 
-                _ctx = Context(mesh_path, inst_methods, loc, iter, self.RESOL_MAP[resol], self.MISC[0] in miscs)
+                self._ctx = Context(mesh_path, inst_methods, loc, int(iter), self.RESOL_MAP[resol], self.MISC[0] in miscs)
 
                 progress(0, desc='正在进行点云采样')
-                _ctx.preprocess()
+                self._ctx.preprocess([sample_down, sample_mid, sample_up])
 
                 progress(0, desc='正在进行符号距离场重建')
-                _ctx.reconstruct_latent()
+                self._ctx.reconstruct_latent()
 
                 progress(0, desc='正在提取零等值面')
-                recon_meshes = _ctx.extract_surface()
+                # extract at xxx_raw.obj
+                self._ctx.extract_surface()
+
+                progress(0, desc='正在后处理')
+                meshes, slices, errors  = self._ctx.post_compute(smooth)
                 '''
-                {
+                meshes = {
                     'ToothDIT': 'path/to/obj',
                     'DIF-Net': None
                 }
+                slices = {
+                    ...
+                }
+                errors = {
+                    ...
+                }
                 '''
-
-                progress(0, desc='正在计算误差')
-                ...
-
                 result = {}
-
                 for mtd in self.Methods:
                     mtd = mtd.__str__()
-                    result[otp_meshes[reverse_index[mtd]]] = recon_meshes.get(mtd, None)
-
-                result[otp_slices] = None
-                result[otp_errors] = None
+                    result[otp_meshes[reverse_index[mtd]]] = meshes.get(mtd, None)
+                    result[otp_slices[reverse_index[mtd]]] = slices.get(mtd, None)
+                    result[otp_errors[reverse_index[mtd]]] = errors.get(mtd, None)
 
                 return result
 
@@ -195,10 +220,26 @@ class GradioGUI:
                 gr.Warning('上传文件失败')
                 return { btn_commit: gr.update(interactive=False) }
 
+            def on_smooth_change(smooth: int, progress=gr.Progress(track_tqdm=True)):
+                progress(0, desc='正在进行网格平滑处理')
+                meshes, slices, errors = {}, {}, {}
+                if self._ctx and self._ctx.finished:
+                    meshes, slices, errors = self._ctx.post_compute(smooth)
+
+                result = {}
+                for mtd in self.Methods:
+                    mtd = mtd.__str__()
+                    result[otp_meshes[reverse_index[mtd]]] = meshes.get(mtd, None)
+                    result[otp_slices[reverse_index[mtd]]] = slices.get(mtd, None)
+                    result[otp_errors[reverse_index[mtd]]] = errors.get(mtd, None)
+
+                return result
+
+            ######### Listen Events ###########
             inp_miscs.change(
                 on_misc_change,
                 inputs=[inp_miscs, inp_methods, inp_loc],
-                outputs=[show_total, show_slices, show_errors, *show_templates, *otp_templates]
+                outputs=[show_total, *show_templates, *otp_templates]
             )
             inp_methods.change(
                 on_methods_change,
@@ -215,10 +256,20 @@ class GradioGUI:
                 inputs=[inp_mesh],
                 outputs=[btn_commit]
             )
+            inp_smooth.release(
+                on_smooth_change,
+                inputs=[inp_smooth],
+                outputs=[*otp_meshes, *otp_slices, *otp_errors]
+            )
             btn_commit.click(
                 on_submit_click,
-                inputs=[inp_mesh, inp_methods, inp_loc, inp_iter, inp_resol, inp_miscs],
-                outputs=[*otp_meshes, otp_slices, otp_errors]
+                inputs=[
+                    inp_mesh, inp_methods, inp_loc,
+                    inp_iter, inp_resol, inp_miscs,
+                    inp_sample_up, inp_sample_mid, inp_sample_down,
+                    inp_smooth
+                ],
+                outputs=[*otp_meshes, *otp_slices, *otp_errors]
             )
 
 

@@ -149,11 +149,8 @@ class Mtd_ToothDIT(VMethod):
         npz = np.load(filename)
         pos_tensor = torch.from_numpy(npz["pos"])
         neg_tensor = torch.from_numpy(npz["neg"])
-        surf_pnts_tensor = torch.from_numpy(npz["surf_pnts"])
-        surf_norms_tensor = torch.from_numpy(npz["surf_norms"])
-        on_surfs = torch.cat([surf_pnts_tensor, surf_norms_tensor], 1)
 
-        return [pos_tensor, neg_tensor, on_surfs]
+        return [pos_tensor, neg_tensor]
 
     def __unpack_sdf_samples_from_ram(self, data, subsample=None):
         if subsample is None:
