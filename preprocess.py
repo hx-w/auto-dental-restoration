@@ -81,3 +81,4 @@ def sample_sdfs(mesh: trimesh.Trimesh, methods: List[str], base_dir: str, sample
         else:
             raise gr.Error('采样错误')
 
+    return pointcloud

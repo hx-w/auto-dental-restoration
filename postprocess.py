@@ -7,6 +7,8 @@ import trimesh
 import skimage.measure
 import seaborn as sns
 import matplotlib.pyplot as plt
+import plotly.express as px
+
 
 def extract_mesh(method, model, latent_code, resol: int, max_batch: int = 32 ** 3 * 4) -> trimesh.Trimesh:
     model.eval()
@@ -83,33 +85,52 @@ def build_mesh_from_sdf(pytorch_3d_sdf_tensor, voxel_grid_origin, voxel_size):
 
     return trimesh.Trimesh(mesh_points, faces)
 
-def create_slice_image(method, model, latent_code, resol, x_axis, y_axis, z_axis):
+def create_SDF_slice_from_mesh(pointcloud, resol: int, x_axis, y_axis, z_axis):
     sample_pnts = None
     if x_axis is not None:
         sample_pnts = torch.Tensor([
             (x_axis, (x / resol) * 20 - 20 / 2, (z / resol) * 20 - 20 / 2)
             for x in range(resol) for z in range(resol)
-        ]).cuda()
+        ])
     elif y_axis is not None:
         sample_pnts = torch.Tensor([
             ((x / resol) * 20 - 20 / 2, y_axis, (z / resol) * 20 - 20 / 2)
             for x in range(resol) for z in range(resol)
-        ]).cuda()
+        ])
     else:
         sample_pnts = torch.Tensor([
             ((x / resol) * 20 - 20 / 2, (z / resol) * 20 - 20 / 2, z_axis)
             for x in range(resol) for z in range(resol)
-        ]).cuda()
+        ])
 
-    sdfs = (
-        method.query_sdf(model, latent_code, sample_pnts)
-        .squeeze(1).detach().cpu().numpy().reshape((resol, resol))
-    )
+    sdfs = pointcloud.get_sdf_in_batches(sample_pnts, use_depth_buffer=False, sample_count=11)
+    sdfs = np.clip(sdfs, -1.0, 1.0).reshape((resol, resol))
 
-    style = 'YlBuRd_r'
+    style = 'coolwarm'
     plt.figure(figsize = (50, 50))
     htmap = sns.heatmap(sdfs, cmap=style, cbar=False, xticklabels=False, yticklabels=False)
-    
     return htmap.get_figure()
-    if filename:
-        htmap.get_figure().savefig(filename, pad_inches=False, bbox_inches='tight')
+
+def create_error_plot(pointcloud, ref_mesh):
+    '''
+    defect pointcloud to restored mesh
+    '''
+    errors = pointcloud.get_sdf_in_batches(ref_mesh.vertices, use_depth_buffer=False, sample_count=11)
+    max_dist = np.max(errors)
+    min_dist = np.min(errors)
+
+    x_axis = np.linspace(min_dist, max_dist, 100)
+    y_axis = np.zeros_like(x_axis)
+
+    for i, x in tqdm(enumerate(x_axis), desc='计算误差分布'):
+        y_axis[i] = len(errors[np.logical_and(errors >= x, errors < x + (max_dist - min_dist) / 100)])
+
+    # df = pd.DataFrame({'ranges': x_axis, 'counts': y_axis})
+    fig = px.line({'ranges': x_axis, 'counts': y_axis}, x='ranges', y='counts')
+    fig.update_layout(
+        title="误差分布图",
+        xaxis_title="误差区间",
+        yaxis_title="计数",
+    )
+
+    return fig

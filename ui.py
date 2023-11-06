@@ -7,6 +7,7 @@ from context import Context
 class GradioGUI:
     def __init__(self, methods: list):
         self.MISC = ['使用缓存', '显示模板牙']
+        self.POST = ['显示SDF切面', '显示误差分布']
         self.LOCS = ['#11', '#15']
         self.RESOL_MAP = {
             '低 (128x128)': 128,
@@ -61,8 +62,8 @@ class GradioGUI:
                     inp_resol = gr.Dropdown(
                         label="网格重建精度",
                         info="括号中为Marching Cubes的体素精度",
-                        choices=["低 (128x128)", "中 (256x256)", "高 (512x512)"],
-                        value="中 (256x256)",
+                        choices=self.RESOL_MAP.keys(),
+                        value=list(self.RESOL_MAP.keys())[1], # 256 x 256
                     )
 
                     with gr.Row():
@@ -77,7 +78,7 @@ class GradioGUI:
                         with gr.Row():
                             inp_post = gr.CheckboxGroup(
                                 show_label=False,
-                                choices=['计算SDF切面图', '计算误差分布'],
+                                choices=self.POST,
                                 value=[]
                             )
 
@@ -137,35 +138,26 @@ class GradioGUI:
 
                 return result
             
-            def on_misc_change(misc_selected: list, method_selected: list, loc: str):
-                _total = len(misc_selected) > 1 or (len(misc_selected) == 1 and self.MISC[0] not in misc_selected)
-                _temps = self.MISC[1] in misc_selected
+            def on_show_off_change(methods: list, miscs: list, posts: list, loc):
+                if len(methods) == 0:
+                    gr.Warning('至少选择一个补全方法')
+    
+                _addon_total = len(miscs) > 1 or (len(miscs) == 1 and self.MISC[0] not in miscs)
+                _addon_total = _addon_total or len(posts) > 0
+                _show_temp = self.MISC[1] in miscs
+                _show_slice = self.POST[0] in posts
+                _show_error = self.POST[1] in posts
 
                 result = {
-                    show_total: gr.update(visible=_total),
+                    show_total: gr.update(visible=_addon_total),
                     **on_location_change(loc)
                 }
-
                 for mtd in self.Methods:
                     mtd = mtd.__str__()
-                    result[show_templates[reverse_index[mtd]]] = gr.update(visible=_temps and mtd in method_selected)
-
-                return result
-
-            # def on_post_change(smooth: int, post_selected: list)
-
-            def on_methods_change(method_selected: list, misc_selected: list):
-                if len(method_selected) == 0:
-                    gr.Warning('至少选择一个补全方法')
-
-                show_temp = self.MISC[1] in misc_selected
-
-                result = {}
-                for mtd in self.Methods:
-                    mtd = mtd.__str__()
-                    result[show_otps[reverse_index[mtd]]] = gr.update(visible=mtd in method_selected)
-
-                    result[show_templates[reverse_index[mtd]]] = gr.update(visible=show_temp and mtd in method_selected)
+                    result[show_otps[reverse_index[mtd]]] = gr.update(visible=mtd in methods)
+                    result[show_templates[reverse_index[mtd]]] = gr.update(visible=_show_temp and mtd in methods)
+                    result[show_slices[reverse_index[mtd]]] = gr.update(visible=_show_slice and mtd in methods)
+                    result[show_errors[reverse_index[mtd]]] = gr.update(visible=_show_error and mtd in methods)
 
                 return result
 
@@ -236,16 +228,30 @@ class GradioGUI:
                 return result
 
             ######### Listen Events ###########
-            inp_miscs.change(
-                on_misc_change,
-                inputs=[inp_miscs, inp_methods, inp_loc],
-                outputs=[show_total, *show_templates, *otp_templates]
-            )
-            inp_methods.change(
-                on_methods_change,
-                inputs=[inp_methods, inp_miscs],
-                outputs=[*show_otps, *show_templates]
-            )
+
+            [
+                inp_inst.change(
+                    on_show_off_change,
+                    inputs=[inp_methods, inp_miscs, inp_post, inp_loc],
+                    outputs=[show_total, *show_otps, *show_templates, *show_slices, *show_errors, *otp_templates]
+                )
+                for inp_inst in [inp_miscs, inp_methods, inp_post] # 这三个控件都对应同一个事件
+            ]
+            # inp_miscs.change(
+            #     on_show_off_change,
+            #     inputs=[inp_methods, inp_miscs, inp_post, inp_loc],
+            #     outputs=[show_total, *show_otps, *show_templates, *show_slices, *show_errors, *otp_templates]
+            # )
+            # inp_methods.change(
+            #     on_show_off_change,
+            #     inputs=[inp_methods, inp_miscs, inp_post, inp_loc],
+            #     outputs=[show_total, *show_otps, *show_templates, *show_slices, *show_errors, *otp_templates]
+            # )
+            # inp_post.change(
+            #     on_show_off_change,
+            #     inputs=[inp_methods, inp_miscs, inp_post, inp_loc],
+            #     outputs=[show_total, *show_otps, *show_templates, *show_slices, *show_errors, *otp_templates]
+            # )
             inp_loc.change(
                 on_location_change,
                 inputs=[inp_loc],
